@@ -4,3 +4,4 @@ pyqtgraph>=0.13.0
 matplotlib>=3.7.0
 Pillow>=10.0.0
 scipy
+pandas
