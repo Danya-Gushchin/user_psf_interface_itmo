@@ -1,0 +1,12 @@
+{
+    "size": 512,
+    "wavelength": 0.555,
+    "back_aperture": 0.5,
+    "magnification": 1.0,
+    "defocus": 0.0,
+    "astigmatism": 0.0,
+    "pupil_diameter": 8.0,
+    "step_pupil": 0.0625,
+    "step_object": 0.13875,
+    "step_image": 0.13875
+}
