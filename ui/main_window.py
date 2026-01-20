@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QPushButton, QGroupBox, QFileDialog, QMessageBox, QToolBar,
     QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QTabWidget, QSpinBox, QDoubleSpinBox, QCheckBox,
-    QApplication, QMenu, QAbstractItemView, QDockWidget
+    QApplication, QMenu, QAbstractItemView, QDockWidget, QDialog
 )
 from PyQt6.QtGui import QAction, QClipboard, QKeySequence
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -11,6 +11,7 @@ from core.psf_params import ParamPSF
 from core.psf_calculator import PSFCalculator
 from ui.psf_view import PSFView
 from ui.log_widget import LogWidget
+from ui.settings_dialog import SettingsDialog
 import json
 import numpy as np
 from datetime import datetime
@@ -41,7 +42,13 @@ class ParameterTable(QTableWidget):
         """Инициализация таблицы"""
         headers = [
             "№", "Размер", "λ (мкм)", "Апертура", "Ув.", 
-            "Расфок.", "Астигм.", "Диаметр", "Штрель", "Статус"
+            "Расфок.", "Астигм.", 
+            "Охват зр.",   # Охват зрачка (к.ед.)
+            "Шаг зр.",     # Шаг по зрачку (к.ед.)
+            "Шаг предм.",  # Шаг по предмету (к.ед.)
+            "Шаг изобр.",  # Шаг по изображению (к.ед.)
+            "Штрель", 
+            "Статус"
         ]
         
         self.setColumnCount(len(headers))
@@ -56,9 +63,12 @@ class ParameterTable(QTableWidget):
         self.setColumnWidth(4, 50)   # Ув.
         self.setColumnWidth(5, 70)   # Расфок.
         self.setColumnWidth(6, 70)   # Астигм.
-        self.setColumnWidth(7, 70)   # Диаметр
-        self.setColumnWidth(8, 80)   # Штрель
-        self.setColumnWidth(9, 100)  # Статус
+        self.setColumnWidth(7, 70)   # Охват зрачка (к.ед.)
+        self.setColumnWidth(8, 70)   # Шаг по зрачку (к.ед.)
+        self.setColumnWidth(9, 70)   # Шаг по предмету (к.ед.)
+        self.setColumnWidth(10, 70)  # Шаг по изображению (к.ед.)
+        self.setColumnWidth(11, 80)  # Штрель
+        self.setColumnWidth(12, 100) # Статус
         
         # Настраиваем выбор строк
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -135,14 +145,19 @@ class ParameterTable(QTableWidget):
             # Значения по умолчанию
             default_values = [
                 "512", "0.555", "0.5", "1.0", 
-                "0.0", "0.0", "8.0", "0.000", "Не рассч."
+                "0.0", "0.0", 
+                "8.0",       # Охват зрачка
+                "0.0625",    # Шаг по зрачку
+                "0.13875",   # Шаг по предмету
+                "0.13875",   # Шаг по изображению
+                "0.000", "Не рассч."
             ]
             
             for col, value in enumerate(default_values, 1):
                 item = QTableWidgetItem(value)
-                if col in [1, 2, 3, 5, 6, 7, 8]:  # Числовые поля
+                if col in [1, 2, 3, 5, 6, 7, 8, 9, 10, 11]:  # Числовые поля
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                elif col == 9:  # Статус
+                elif col == 12:  # Статус
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.setItem(row, col, item)
         
@@ -161,16 +176,19 @@ class ParameterTable(QTableWidget):
             f"{params.magnification:.1f}",
             f"{params.defocus:.3f}",
             f"{params.astigmatism:.3f}",
-            f"{params.pupil_diameter:.3f}",
+            f"{params.pupil_diameter:.3f}",     # Охват зрачка
+            f"{params.step_pupil:.6f}",         # Шаг по зрачку
+            f"{params.step_object:.6f}",        # Шаг по предмету
+            f"{params.step_image:.6f}",         # Шаг по изображению
             "0.000",
             "Не рассч."
         ]
         
         for col, value in enumerate(values, 1):
             item = QTableWidgetItem(value)
-            if col in [1, 2, 3, 5, 6, 7, 8]:  # Числовые поля
+            if col in [1, 2, 3, 5, 6, 7, 8, 9, 10, 11]:  # Числовые поля
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            elif col == 9:  # Статус
+            elif col == 12:  # Статус
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(row, col, item)
     
@@ -224,7 +242,7 @@ class ParameterTable(QTableWidget):
             # Получаем параметры из таблицы
             params = self._get_params_from_row(row)
             if params is None:
-                self.setItem(row, 9, QTableWidgetItem("Ошибка ввода"))
+                self.setItem(row, 12, QTableWidgetItem("Ошибка ввода"))
                 return
                 
             # Вычисляем PSF
@@ -233,11 +251,11 @@ class ParameterTable(QTableWidget):
             # Обновляем таблицу
             item = QTableWidgetItem(f"{strehl_ratio:.6f}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.setItem(row, 8, item)
+            self.setItem(row, 11, item)
             
             item = QTableWidgetItem("Рассчитано")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.setItem(row, 9, item)
+            self.setItem(row, 12, item)
             
             # Сохраняем обновленные параметры
             if row < len(self.current_params_list):
@@ -251,7 +269,7 @@ class ParameterTable(QTableWidget):
         except Exception as e:
             item = QTableWidgetItem("Ошибка")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.setItem(row, 9, item)
+            self.setItem(row, 12, item)
             print(f"Ошибка вычисления строки {row}: {e}")
             traceback.print_exc()
     
@@ -262,7 +280,7 @@ class ParameterTable(QTableWidget):
             
             # Получаем значения из ячеек
             cells = {}
-            for col in range(1, 8):
+            for col in range(1, 11):  # Теперь 10 колонок с данными (до Штреля)
                 item = self.item(row, col)
                 if item and item.text().strip():
                     cells[col] = item.text().strip()
@@ -277,6 +295,9 @@ class ParameterTable(QTableWidget):
             params.defocus = float(cells[5]) if cells[5] else 0.0
             params.astigmatism = float(cells[6]) if cells[6] else 0.0
             params.pupil_diameter = float(cells[7]) if cells[7] else 8.0
+            params.step_pupil = float(cells[8]) if cells[8] else 0.0625
+            params.step_object = float(cells[9]) if cells[9] else 0.13875
+            params.step_image = float(cells[10]) if cells[10] else 0.13875
             
             return params
             
@@ -303,8 +324,30 @@ class ParameterTable(QTableWidget):
                     if row < len(self.current_params_list):
                         self.current_params_list[row] = params
                     
+                    # Обновляем отображение в таблице
+                    self._update_row_steps(row, params)
+                    
             except Exception as e:
                 print(f"Ошибка пересчета шагов строки {row}: {e}")
+    
+    def _update_row_steps(self, row: int, params: ParamPSF):
+        """Обновить отображение шагов в строке таблицы"""
+        # Обновляем значения шагов в таблице
+        step_items = [
+            (7, f"{params.pupil_diameter:.3f}"),
+            (8, f"{params.step_pupil:.6f}"),
+            (9, f"{params.step_object:.6f}"),
+            (10, f"{params.step_image:.6f}")
+        ]
+        
+        for col, value in step_items:
+            item = self.item(row, col)
+            if item:
+                item.setText(value)
+            else:
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.setItem(row, col, item)
     
     def get_selected_params(self) -> ParamPSF:
         """Получить параметры выбранной строки"""
@@ -324,7 +367,7 @@ class ParameterTable(QTableWidget):
             return 0.0
             
         row = selected[0]
-        item = self.item(row, 8)
+        item = self.item(row, 11)  # Колонка Штреля
         if item and item.text().strip():
             try:
                 return float(item.text())
@@ -467,8 +510,14 @@ class ParameterTable(QTableWidget):
                                 col_map['defocus'] = i
                             elif 'астигм' in header_lower or 'astigmatism' in header_lower:
                                 col_map['astigmatism'] = i
-                            elif 'диаметр' in header_lower or 'diameter' in header_lower:
-                                col_map['diameter'] = i
+                            elif 'охват' in header_lower or 'диаметр' in header_lower or 'diameter' in header_lower or 'pupil' in header_lower:
+                                col_map['pupil_diameter'] = i
+                            elif 'шаг зр' in header_lower or 'step_pupil' in header_lower:
+                                col_map['step_pupil'] = i
+                            elif 'шаг предм' in header_lower or 'step_object' in header_lower:
+                                col_map['step_object'] = i
+                            elif 'шаг изобр' in header_lower or 'step_image' in header_lower:
+                                col_map['step_image'] = i
                             elif 'штрель' in header_lower or 'strehl' in header_lower:
                                 col_map['strehl'] = i
                             elif 'статус' in header_lower or 'status' in header_lower:
@@ -489,8 +538,14 @@ class ParameterTable(QTableWidget):
                             params.defocus = float(parts[col_map['defocus']]) if parts[col_map['defocus']] else 0.0
                         if 'astigmatism' in col_map:
                             params.astigmatism = float(parts[col_map['astigmatism']]) if parts[col_map['astigmatism']] else 0.0
-                        if 'diameter' in col_map:
-                            params.pupil_diameter = float(parts[col_map['diameter']]) if parts[col_map['diameter']] else 8.0
+                        if 'pupil_diameter' in col_map:
+                            params.pupil_diameter = float(parts[col_map['pupil_diameter']]) if parts[col_map['pupil_diameter']] else 8.0
+                        if 'step_pupil' in col_map:
+                            params.step_pupil = float(parts[col_map['step_pupil']]) if parts[col_map['step_pupil']] else 0.0625
+                        if 'step_object' in col_map:
+                            params.step_object = float(parts[col_map['step_object']]) if parts[col_map['step_object']] else 0.13875
+                        if 'step_image' in col_map:
+                            params.step_image = float(parts[col_map['step_image']]) if parts[col_map['step_image']] else 0.13875
                         
                         # Добавляем строку
                         self.add_row(params)
@@ -502,7 +557,7 @@ class ParameterTable(QTableWidget):
                             if strehl_value:
                                 item = QTableWidgetItem(strehl_value)
                                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                                self.setItem(row_idx, 8, item)
+                                self.setItem(row_idx, 11, item)
                         
                         # Если есть статус, устанавливаем его
                         if 'status' in col_map and col_map['status'] < len(parts) and parts[col_map['status']]:
@@ -511,7 +566,7 @@ class ParameterTable(QTableWidget):
                             if status_value:
                                 item = QTableWidgetItem(status_value)
                                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                                self.setItem(row_idx, 9, item)
+                                self.setItem(row_idx, 12, item)
                             
                     except Exception as e:
                         print(f"Ошибка импорта строки {line_num}: {e}")
@@ -567,6 +622,9 @@ class PSFMainWindow(QMainWindow):
         self.btn_clear_table = QPushButton("Очистить таблицу")
         self.btn_clear_table.clicked.connect(self._clear_table)
         
+        self.btn_settings = QPushButton("Настройки параметров")
+        self.btn_settings.clicked.connect(self._show_settings_dialog)
+        
         self.btn_recalc_steps = QPushButton("Пересчет шагов")
         self.btn_recalc_steps.clicked.connect(self._recalculate_steps)
         
@@ -579,6 +637,7 @@ class PSFMainWindow(QMainWindow):
         table_toolbar.addWidget(self.btn_add_row)
         table_toolbar.addWidget(self.btn_delete_row)
         table_toolbar.addWidget(self.btn_clear_table)
+        table_toolbar.addWidget(self.btn_settings)
         table_toolbar.addWidget(self.btn_recalc_steps)
         table_toolbar.addStretch()
         table_toolbar.addWidget(self.btn_calc_selected)
@@ -648,14 +707,18 @@ class PSFMainWindow(QMainWindow):
         # Меню Таблица
         table_menu = menu.addMenu("Таблица")
         
+        act_settings = QAction("Настройки параметров", self)
         act_copy_table = QAction("Копировать таблицу", self)
         act_paste_table = QAction("Вставить таблицу", self)
         act_import_csv = QAction("Импорт CSV", self)
         
+        act_settings.triggered.connect(self._show_settings_dialog)
         act_copy_table.triggered.connect(self._copy_table)
         act_paste_table.triggered.connect(self._paste_table)
         act_import_csv.triggered.connect(self._import_csv)
         
+        table_menu.addAction(act_settings)
+        table_menu.addSeparator()
         table_menu.addAction(act_copy_table)
         table_menu.addAction(act_paste_table)
         table_menu.addSeparator()
@@ -669,6 +732,7 @@ class PSFMainWindow(QMainWindow):
         toolbar.addAction(act_load_table)
         toolbar.addAction(act_save_table)
         toolbar.addSeparator()
+        toolbar.addAction(act_settings)
         toolbar.addAction(act_copy_table)
         toolbar.addAction(act_export_image)
         
@@ -682,7 +746,9 @@ class PSFMainWindow(QMainWindow):
             ParamPSF(size=256, wavelength=0.488, defocus=0.05, astigmatism=0.02),
         ]
         
+        # Пересчитываем шаги для каждого набора параметров
         for params in default_params:
+            params.recalculate_from_pupil_diameter()
             self.table_widget.add_row(params)
             
     def _add_table_row(self):
@@ -714,6 +780,56 @@ class PSFMainWindow(QMainWindow):
         self.log_widget.add_log("Выполнен пересчет шагов для всей таблицы")
         QMessageBox.information(self, "Пересчет шагов", "Параметры дискретизации пересчитаны")
         
+    def _show_settings_dialog(self):
+        """Показать диалог настроек параметров"""
+        # Получаем параметры из выбранной строки или создаем новые
+        params = self.table_widget.get_selected_params()
+        if params is None:
+            params = ParamPSF()
+            
+        # Создаем и показываем диалог
+        dialog = SettingsDialog(params, self)
+        dialog.settings_changed.connect(self._on_settings_changed)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.log_widget.add_log("Параметры дискретизации обновлены")
+            
+    def _on_settings_changed(self, params: ParamPSF):
+        """Обработчик изменения настроек параметров"""
+        # Обновляем текущие параметры
+        self.params = params
+        
+        # Обновляем выбранную строку в таблице
+        selected_rows = self.table_widget.get_selected_rows()
+        if selected_rows:
+            row = selected_rows[0]
+            self._update_table_row_with_params(row, params)
+            
+        # Обновляем отображение
+        if selected_rows:
+            self._on_table_selection_changed(selected_rows[0])
+        
+    def _update_table_row_with_params(self, row: int, params: ParamPSF):
+        """Обновить строку таблицы с новыми параметрами"""
+        if row < self.table_widget.rowCount():
+            # Обновляем значения в таблице
+            self.table_widget.item(row, 1).setText(str(params.size))
+            self.table_widget.item(row, 2).setText(f"{params.wavelength:.3f}")
+            self.table_widget.item(row, 3).setText(f"{params.back_aperture:.3f}")
+            self.table_widget.item(row, 4).setText(f"{params.magnification:.1f}")
+            self.table_widget.item(row, 5).setText(f"{params.defocus:.3f}")
+            self.table_widget.item(row, 6).setText(f"{params.astigmatism:.3f}")
+            self.table_widget.item(row, 7).setText(f"{params.pupil_diameter:.3f}")
+            self.table_widget.item(row, 8).setText(f"{params.step_pupil:.6f}")
+            self.table_widget.item(row, 9).setText(f"{params.step_object:.6f}")
+            self.table_widget.item(row, 10).setText(f"{params.step_image:.6f}")
+            
+            # Обновляем список параметров
+            if row < len(self.table_widget.current_params_list):
+                self.table_widget.current_params_list[row] = params
+            else:
+                self.table_widget.current_params_list.append(params)
+            
     def _calculate_selected(self):
         """Вычислить выбранную строку"""
         self.table_widget.calculate_selected()
@@ -742,18 +858,23 @@ class PSFMainWindow(QMainWindow):
         
         if params:
             # Обновляем информацию
+            step_microns = params.calculate_step_microns()
             info_text = f"""
             <b>Строка {row+1}:</b><br><br>
-            <b>Параметры:</b><br>
+            <b>Основные параметры:</b><br>
             • Размер: {params.size}<br>
             • λ: {params.wavelength:.3f} мкм<br>
             • Апертура: {params.back_aperture:.3f}<br>
             • Увеличение: {params.magnification:.1f}<br>
             • Расфокусировка: {params.defocus:.3f}<br>
-            • Астигматизм: {params.astigmatism:.3f}<br>
-            • Диаметр зрачка: {params.pupil_diameter:.3f} к.ед.<br><br>
-            <b>Число Штреля:</b> {strehl:.6f}<br>
-            <b>Шаг в изображении:</b> {params.step_image:.6f} к.ед.
+            • Астигматизм: {params.astigmatism:.3f}<br><br>
+            <b>Параметры дискретизации:</b><br>
+            • Охват зрачка: {params.pupil_diameter:.3f} к.ед.<br>
+            • Шаг по зрачку: {params.step_pupil:.6f} к.ед.<br>
+            • Шаг по предмету: {params.step_object:.6f} к.ед.<br>
+            • Шаг по изображению: {params.step_image:.6f} к.ед.<br>
+            • Шаг в изображении: {step_microns:.6f} мкм<br><br>
+            <b>Число Штреля:</b> {strehl:.6f}
             """
             self.selected_info_label.setText(info_text)
             

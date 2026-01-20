@@ -6,7 +6,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
-    # Базовый стиль для темной темы
+    # Базовый стиль для темной темы (оставляем без изменений)
     app.setStyleSheet("""
         QMainWindow {
             background-color: #2b2b2b;
@@ -96,6 +96,16 @@ def main():
             background-color: #353535;
             border: none;
             spacing: 5px;
+        }
+        QDialog {
+            background-color: #2b2b2b;
+            color: white;
+        }
+        QDoubleSpinBox {
+            background-color: #2b2b2b;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px;
         }
     """)
     
