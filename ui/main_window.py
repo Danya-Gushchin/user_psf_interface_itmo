@@ -22,6 +22,7 @@ import pandas as pd
 import csv
 from ui.report_generator import ReportGenerator
 from ui.preview_dialog import PreviewDialog
+from PyQt6.QtCore import QTimer
 
 
 class ParameterTable(QTableWidget):
@@ -29,6 +30,7 @@ class ParameterTable(QTableWidget):
     
     calculation_complete = pyqtSignal(int, float)  # row, strehl_ratio
     selection_changed = pyqtSignal(int)  # row
+    cell_changed = pyqtSignal(int, int)  # row, col - НОВЫЙ СИГНАЛ
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,6 +41,37 @@ class ParameterTable(QTableWidget):
         self._init_table()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        
+        # Подключаем сигнал изменения ячеек
+        self.cellChanged.connect(self._on_cell_changed)
+    
+    def _on_cell_changed(self, row: int, column: int):
+        """Обработчик изменения ячейки"""
+        # Игнорируем колонки №, Штрель, Статус
+        if column not in [0, 11, 12]:
+            self.cell_changed.emit(row, column)
+            
+            # Автоматически пересчитываем шаги если изменились связанные параметры
+            if column in [1, 7]:  # Размер или охват зрачка
+                self._recalculate_steps_for_row(row)
+    
+    def _recalculate_steps_for_row(self, row: int):
+        """Пересчитать шаги для конкретной строки"""
+        try:
+            params = self._get_params_from_row(row)
+            if params:
+                # Пересчитываем на основе охвата зрачка
+                params.recalculate_from_pupil_diameter()
+                
+                # Обновляем отображение шагов
+                self._update_row_steps(row, params)
+                
+                # Обновляем параметры в списке
+                if row < len(self.current_params_list):
+                    self.current_params_list[row] = params
+                    
+        except Exception as e:
+            print(f"Ошибка пересчета шагов строки {row}: {e}")
         
     def _init_table(self):
         """Инициализация таблицы"""
@@ -614,6 +647,11 @@ class PSFMainWindow(QMainWindow):
         self.table_widget = ParameterTable()
         self.table_widget.calculation_complete.connect(self._on_calculation_complete)
         self.table_widget.selection_changed.connect(self._on_table_selection_changed)
+
+        self.table_widget = ParameterTable()
+        self.table_widget.calculation_complete.connect(self._on_calculation_complete)
+        self.table_widget.selection_changed.connect(self._on_table_selection_changed)
+        self.table_widget.cell_changed.connect(self._on_table_cell_changed)  # НОВЫЙ СИГНАЛ
         
         # Панель инструментов таблицы (ОБНОВЛЕННАЯ с кнопками печати)
         table_toolbar = QHBoxLayout()
@@ -632,6 +670,15 @@ class PSFMainWindow(QMainWindow):
         
         self.btn_recalc_steps = QPushButton("Пересчет шагов")
         self.btn_recalc_steps.clicked.connect(self._recalculate_steps)
+
+        # В панель инструментов таблицы добавьте:
+        self.btn_update_current = QPushButton("Обновить текущую")
+        self.btn_update_current.clicked.connect(self._update_current_row)
+        self.btn_update_current.setToolTip("Пересчитать PSF для выбранной строки")
+
+        # Добавьте в table_toolbar:
+        table_toolbar.addWidget(self.btn_update_current)
+        
         
         # НОВЫЕ КНОПКИ ПЕЧАТИ
         self.btn_preview_report = QPushButton("Предпросмотр отчета")
@@ -674,6 +721,66 @@ class PSFMainWindow(QMainWindow):
         
         # Добавляем несколько строк по умолчанию
         self._add_default_rows()
+    
+    def _update_current_row(self):
+        """Обновить выбранную строку"""
+        selected_rows = self.table_widget.get_selected_rows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Предупреждение", "Выберите строку для обновления")
+            return
+        
+        row = selected_rows[0]
+        params = self.table_widget._get_params_from_row(row)
+        if params is None:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить параметры строки")
+            return
+        
+        # Сохраняем обновленные параметры
+        if row < len(self.table_widget.current_params_list):
+            self.table_widget.current_params_list[row] = params
+        else:
+            self.table_widget.current_params_list.append(params)
+        
+        # Пересчитываем и отображаем
+        self._recalculate_and_display_psf(row, params)
+
+
+
+    def _on_table_cell_changed(self, row: int, column: int):
+        """Обработчик изменения ячейки в таблице"""
+        # Используем таймер для предотвращения множественных пересчетов
+        if hasattr(self, '_recalculate_timer'):
+            self._recalculate_timer.stop()
+        
+        self._recalculate_timer = QTimer()
+        self._recalculate_timer.setSingleShot(True)
+        self._recalculate_timer.timeout.connect(
+            lambda: self._process_cell_change(row, column)
+        )
+        self._recalculate_timer.start(500)  # 500ms задержка
+
+    def _process_cell_change(self, row: int, column: int):
+        """Обработать изменение ячейки после задержки"""
+        try:
+            # Получаем параметры из строки
+            params = self.table_widget._get_params_from_row(row)
+            if params is None:
+                return
+            
+            # Сохраняем обновленные параметры
+            if row < len(self.table_widget.current_params_list):
+                self.table_widget.current_params_list[row] = params
+            else:
+                self.table_widget.current_params_list.append(params)
+            
+            # Если эта строка выбрана - пересчитываем PSF
+            selected_rows = self.table_widget.get_selected_rows()
+            if selected_rows and selected_rows[0] == row:
+                self._recalculate_and_display_psf(row, params)
+                
+        except Exception as e:
+            print(f"Ошибка обработки изменения ячейки: {e}")
+            traceback.print_exc()
         
     def _init_dock_widgets(self):
         """Инициализация док-виджетов для деталей вычислений"""
@@ -819,6 +926,46 @@ class PSFMainWindow(QMainWindow):
         self.table_widget.recalculate_steps()
         self.log_widget.add_log("Выполнен пересчет шагов для всей таблицы")
         QMessageBox.information(self, "Пересчет шагов", "Параметры дискретизации пересчитаны")
+
+    def _recalculate_and_display_psf(self, row: int, params: ParamPSF):
+        """Пересчитать и отобразить PSF для указанной строки"""
+        try:
+            # Вычисляем PSF
+            self.current_psf, self.strehl_ratio = self.calculator.compute(params)
+            
+            # Обновляем число Штреля в таблице
+            strehl_item = QTableWidgetItem(f"{self.strehl_ratio:.6f}")
+            strehl_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table_widget.setItem(row, 11, strehl_item)
+            
+            # Обновляем статус
+            status_item = QTableWidgetItem("Обновлено")
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_widget.setItem(row, 12, status_item)
+            
+            # Обновляем отображение
+            step_microns = params.calculate_step_microns()
+            self.psf_view.show_psf(self.current_psf, step_microns)
+            
+            # Обновляем информацию
+            strehl = self.table_widget.get_selected_strehl()
+            info_text = self._generate_info_text(row, params, strehl, step_microns)
+            self.selected_info_label.setText(info_text)
+            
+            # Включаем кнопки печати
+            self.btn_preview_report.setEnabled(True)
+            self.btn_print_report.setEnabled(True)
+            
+            self.log_widget.add_log(f"Обновлена ФРТ для строки {row+1}")
+            
+        except Exception as e:
+            self.log_widget.add_log(f"Ошибка пересчета ФРТ: {str(e)}")
+            traceback.print_exc()
+            
+            # Устанавливаем статус ошибки
+            status_item = QTableWidgetItem("Ошибка")
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_widget.setItem(row, 12, status_item)
         
     def _show_settings_dialog(self):
         """Показать диалог настроек параметров"""
@@ -833,6 +980,26 @@ class PSFMainWindow(QMainWindow):
         
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.log_widget.add_log("Параметры дискретизации обновлены")
+    
+    def _generate_info_text(self, row: int, params: ParamPSF, strehl: float, step_microns: float) -> str:
+        """Сгенерировать текст информации о строке"""
+        return f"""
+        <b>Строка {row+1}:</b><br><br>
+        <b>Основные параметры:</b><br>
+        • Размер: {params.size}<br>
+        • λ: {params.wavelength:.3f} мкм<br>
+        • Числовая апертура: {params.back_aperture:.3f}<br>
+        • Увеличение: {params.magnification:.1f}<br>
+        • Расфокусировка: {params.defocus:.3f} λ<br>
+        • Астигматизм: {params.astigmatism:.3f} λ<br><br>
+        <b>Параметры дискретизации:</b><br>
+        • Охват зрачка: {params.pupil_diameter:.3f} к.ед.<br>
+        • Шаг по зрачку: {params.step_pupil:.6f} к.ед.<br>
+        • Шаг по предмету: {params.step_object:.6f} к.ед.<br>
+        • Шаг по изображению: {params.step_image:.6f} к.ед.<br>
+        • Шаг в изображении: {step_microns:.6f} мкм<br><br>
+        <b>Число Штреля:</b> {strehl:.6f}
+        """
             
     def _on_settings_changed(self, params: ParamPSF):
         """Обработчик изменения настроек параметров"""
@@ -845,9 +1012,10 @@ class PSFMainWindow(QMainWindow):
             row = selected_rows[0]
             self._update_table_row_with_params(row, params)
             
-        # Обновляем отображение
-        if selected_rows:
-            self._on_table_selection_changed(selected_rows[0])
+            # НЕМЕДЛЕННО пересчитываем PSF
+            self._recalculate_and_display_psf(row, params)
+    
+        self.log_widget.add_log("Параметры дискретизации обновлены, PSF пересчитана")
         
     def _update_table_row_with_params(self, row: int, params: ParamPSF):
         """Обновить строку таблицы с новыми параметрами"""
@@ -894,39 +1062,30 @@ class PSFMainWindow(QMainWindow):
     def _on_table_selection_changed(self, row: int):
         """Обработчик изменения выбранной строки в таблице"""
         params = self.table_widget.get_selected_params()
-        strehl = self.table_widget.get_selected_strehl()
+        if params is None:
+            return
         
-        if params:
-            # Обновляем информацию
-            step_microns = params.calculate_step_microns()
-            info_text = f"""
-            <b>Строка {row+1}:</b><br><br>
-            <b>Основные параметры:</b><br>
-            • Размер: {params.size}<br>
-            • λ: {params.wavelength:.3f} мкм<br>
-            • Апертура: {params.back_aperture:.3f}<br>
-            • Увеличение: {params.magnification:.1f}<br>
-            • Расфокусировка: {params.defocus:.3f}<br>
-            • Астигматизм: {params.astigmatism:.3f}<br><br>
-            <b>Параметры дискретизации:</b><br>
-            • Охват зрачка: {params.pupil_diameter:.3f} к.ед.<br>
-            • Шаг по зрачку: {params.step_pupil:.6f} к.ед.<br>
-            • Шаг по предмету: {params.step_object:.6f} к.ед.<br>
-            • Шаг по изображению: {params.step_image:.6f} к.ед.<br>
-            • Шаг в изображении: {step_microns:.6f} мкм<br><br>
-            <b>Число Штреля:</b> {strehl:.6f}
-            """
-            self.selected_info_label.setText(info_text)
+        strehl = self.table_widget.get_selected_strehl()
+        step_microns = params.calculate_step_microns()
+        
+        # Обновляем информацию
+        info_text = self._generate_info_text(row, params, strehl, step_microns)
+        self.selected_info_label.setText(info_text)
+        
+        # Вычисляем и отображаем PSF
+        try:
+            self.current_psf, self.strehl_ratio = self.calculator.compute(params)
+            step_microns = self.calculator._step_im_microns
+            self.psf_view.show_psf(self.current_psf, step_microns)
+            self.log_widget.add_log(f"Отображена ФРТ для строки {row+1}")
             
-            # Вычисляем и отображаем PSF
-            try:
-                self.current_psf, self.strehl_ratio = self.calculator.compute(params)
-                step_microns = self.calculator._step_im_microns
-                self.psf_view.show_psf(self.current_psf, step_microns)
-                self.log_widget.add_log(f"Отображена ФРТ для строки {row+1}")
-            except Exception as e:
-                self.log_widget.add_log(f"Ошибка отображения ФРТ: {str(e)}")
-                traceback.print_exc()
+            # Включаем кнопки печати
+            self.btn_preview_report.setEnabled(True)
+            self.btn_print_report.setEnabled(True)
+            
+        except Exception as e:
+            self.log_widget.add_log(f"Ошибка отображения ФРТ: {str(e)}")
+            traceback.print_exc()
                 
     def _new_table(self):
         """Создать новую таблицу"""
