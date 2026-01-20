@@ -1,3 +1,9 @@
-# utils/__init__.py
-__version__ = "1.0"
-__all__ = ['table_utils']
+"""
+Вспомогательные утилиты
+"""
+
+from .table_utils import TableUtils
+
+__all__ = [
+    'TableUtils'
+]

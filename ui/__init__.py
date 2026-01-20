@@ -1,15 +1,20 @@
 """
-Модуль ui содержит пользовательский интерфейс приложения.
+Модули пользовательского интерфейса для расчета ФРТ
 """
 
 from .main_window import PSFMainWindow
 from .psf_view import PSFView
 from .log_widget import LogWidget
+from .settings_dialog import SettingsDialog
+from .preview_dialog import PreviewDialog
+from .report_generator import ReportGenerator
 
 __all__ = [
     'PSFMainWindow',
-    'PSFView',
-    'LogWidget'
+    'PSFView', 
+    'LogWidget',
+    'SettingsDialog',
+    'PreviewDialog',
+    'ProgressDialog',
+    'ReportGenerator'
 ]
-
-print(f"Импортирован модуль ui (версия 1.0)")
