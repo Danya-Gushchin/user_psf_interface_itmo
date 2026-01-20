@@ -983,15 +983,22 @@ class PSFMainWindow(QMainWindow):
     
     def _generate_info_text(self, row: int, params: ParamPSF, strehl: float, step_microns: float) -> str:
         """Сгенерировать текст информации о строке"""
+        # Вычисляем дополнительные параметры
+        airy_radius = params.calculate_airy_disk_radius()
+        rayleigh_resolution = 0.61 * params.wavelength / params.back_aperture if params.back_aperture > 0 else 0
+        
         return f"""
         <b>Строка {row+1}:</b><br><br>
         <b>Основные параметры:</b><br>
         • Размер: {params.size}<br>
-        • λ: {params.wavelength:.3f} мкм<br>
-        • Числовая апертура: {params.back_aperture:.3f}<br>
-        • Увеличение: {params.magnification:.1f}<br>
+        • Длина волны (λ): {params.wavelength:.3f} мкм<br>
+        • Числовая апертура (NA): {params.back_aperture:.3f}<br>
+        • Увеличение (M): {params.magnification:.1f}<br>
         • Расфокусировка: {params.defocus:.3f} λ<br>
         • Астигматизм: {params.astigmatism:.3f} λ<br><br>
+        <b>Характеристики системы:</b><br>
+        • Разрешение по Рэлею: {rayleigh_resolution:.3f} мкм<br>
+        • Радиус Airy диска: {airy_radius:.3f} мкм<br><br>
         <b>Параметры дискретизации:</b><br>
         • Охват зрачка: {params.pupil_diameter:.3f} к.ед.<br>
         • Шаг по зрачку: {params.step_pupil:.6f} к.ед.<br>

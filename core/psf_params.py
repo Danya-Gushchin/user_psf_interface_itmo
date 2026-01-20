@@ -5,10 +5,10 @@ from dataclasses import dataclass
 class ParamPSF:
     size: int = 512
     wavelength: float = 0.555        # мкм
-    back_aperture: float = 0.5
+    back_aperture: float = 0.5       # Числовая апертура NA
     magnification: float = 1.0
-    defocus: float = 0.0
-    astigmatism: float = 0.0
+    defocus: float = 0.0            # в длинах волн λ
+    astigmatism: float = 0.0        # в длинах волн λ
 
     # параметры дискретизации
     pupil_diameter: float = 8.0      # к.ед.
@@ -17,9 +17,23 @@ class ParamPSF:
     step_image: float = 0.13875      # к.ед.
     
     def calculate_step_microns(self) -> float:
-        """Вычислить шаг в микронах"""
-        if self.step_object > 0 and self.wavelength > 0:
-            return self.step_object * self.wavelength / (self.magnification * self.back_aperture)
+        """Вычислить шаг в микронах в плоскости изображения"""
+        if self.step_image > 0 and self.wavelength > 0 and self.back_aperture > 0:
+            # Для дифракционно-ограниченной системы:
+            # Разрешение по Рэлею: δ = 0.61 * λ / NA
+            # Шаг дискретизации должен быть меньше δ/2 (критерий Найквиста)
+            rayleigh_resolution = 0.61 * self.wavelength / self.back_aperture
+            # Шаг в изображении с учетом увеличения
+            step_in_object_space = self.step_image
+            step_in_image_space = step_in_object_space * self.magnification
+            return step_in_image_space
+        return 0.0
+    
+    def calculate_airy_disk_radius(self) -> float:
+        """Вычислить радиус Airy диска в микронах"""
+        if self.wavelength > 0 and self.back_aperture > 0:
+            # Радиус первого нуля Airy диска: 1.22 * λ / NA
+            return 1.22 * self.wavelength / self.back_aperture
         return 0.0
     
     def recalculate_from_pupil_diameter(self):

@@ -191,5 +191,17 @@ class PSFView(QWidget):
         if self.in_microns and self.step_microns > 0:
             extent = size * self.step_microns / 2
             self.image_item.setRect([-extent, -extent, 2*extent, 2*extent])
+            
+            # Обновляем подписи осей
+            self.image_plot.setLabel('bottom', 'X, мкм')
+            self.image_plot.setLabel('left', 'Y, мкм')
+            
+            # Добавляем сетку с физическим масштабом
+            self.image_plot.showGrid(x=True, y=True, alpha=0.3)
         else:
             self.image_item.setRect([-size//2, -size//2, size, size])
+            
+            # Обновляем подписи осей
+            self.image_plot.setLabel('bottom', 'X, пиксели')
+            self.image_plot.setLabel('left', 'Y, пиксели')
+            self.image_plot.showGrid(x=True, y=True, alpha=0.3)
