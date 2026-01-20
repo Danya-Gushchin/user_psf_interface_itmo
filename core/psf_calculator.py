@@ -18,16 +18,19 @@ class PSFCalculator:
         step_obj_can = params.step_object
         
         self.last_params = params
-        self._step_im_microns = step_obj_can * params.wavelength / (params.magnification * params.back_aperture)
+        
+        # Вычисляем шаг в микронах (физический размер пикселя)
+        # В пространстве изображения: размер пикселя = (шаг в пространстве предмета) * увеличение
+        self._step_im_microns = step_obj_can * params.magnification
 
-        # Вычисляем функцию зрачка С УЧЕТОМ ВСЕХ ПАРАМЕТРОВ
+        # Вычисляем функцию зрачка С ПРАВИЛЬНЫМ УЧЕТОМ ВСЕХ ПАРАМЕТРОВ
         pupil = self._calc_pupil_function(
-            size,
-            step_pupil,
-            params.wavelength,      # Добавляем длину волны
-            params.back_aperture,   # Добавляем апертуру
-            params.defocus,
-            params.astigmatism
+            size=size,
+            step_pupil=step_pupil,
+            wavelength=params.wavelength,
+            back_aperture=params.back_aperture,
+            defocus=params.defocus,
+            astigmatism=params.astigmatism
         )
         self.last_pupil = pupil.copy()
 
@@ -36,16 +39,18 @@ class PSFCalculator:
         field = np.fft.ifft2(pupil_shifted)
         field = np.fft.fftshift(field)
 
-        # Масштабирование с учетом увеличения
-        # Для системы с увеличением M: координаты в изображении = координаты в каустике / M
-        field *= (step_pupil / step_obj_can) / params.magnification
+        # Масштабирование: учитываем физический смысл преобразования
+        # field уже представляет распределение поля в фокальной плоскости
+        # Нормировочный коэффициент для правильных единиц
+        field *= (step_pupil / step_obj_can)
 
-        # Интенсивность и нормализация
+        # Интенсивность
         intensity = np.abs(field) ** 2
-        energy = np.sum(intensity)
-
-        if energy > 0:
-            psf = intensity / energy
+        
+        # Нормализация (сумма интенсивностей = 1)
+        total_intensity = np.sum(intensity)
+        if total_intensity > 0:
+            psf = intensity / total_intensity
         else:
             psf = intensity
             
@@ -57,89 +62,95 @@ class PSFCalculator:
         return psf, self.strehl_ratio
 
     def _calc_pupil_function(self, size, step_pupil, wavelength, back_aperture, defocus, astigmatism):
-        """Вычисление функции зрачка с учетом всех параметров"""
-        # Создаем координатную сетку
+        """
+        Вычисление функции зрачка с правильным учетом всех параметров
+        
+        Ключевые моменты:
+        1. Длина волны влияет на масштаб дифракции
+        2. Апертура определяет радиус апертуры
+        3. Defocus и astigmatism - аберрации в единицах длин волн
+        """
+        # Создаем координатную сетку в плоскости зрачка
         x = np.arange(size) - size // 2
         y = np.arange(size) - size // 2
         X, Y = np.meshgrid(x, y)
         
-        # Нормированные координаты (в единицах длины волны)
-        # Масштабируем на длину волны для правильного дифракционного предела
-        X_norm = X * step_pupil / wavelength
-        Y_norm = Y * step_pupil / wavelength
+        # Координаты в единицах длины волны (важно для дифракции!)
+        # Нормируем на длину волны: координаты в единицах λ
+        X_norm = X * step_pupil / wavelength if wavelength > 0 else X * step_pupil
+        Y_norm = Y * step_pupil / wavelength if wavelength > 0 else Y * step_pupil
         
-        # Радиальная и угловая координаты
-        rho2 = X_norm**2 + Y_norm**2
-        rho = np.sqrt(rho2)
+        # Радиальная координата (в единицах λ)
+        rho = np.sqrt(X_norm**2 + Y_norm**2)
+        
+        # Угловая координата
         phi = np.arctan2(Y_norm, X_norm)
-
-        # Апертурная функция (круглая апертура)
-        # back_aperture - числовая апертура NA
-        # В нормированных координатах радиус апертуры = NA / λ
-        aperture_radius = back_aperture / wavelength
-        mask = rho <= aperture_radius
-
-        # Волновая аберрация в единицах длины волны
-        # Масштабируем на квадрат радиуса для правильных единиц
-        norm_factor = (aperture_radius**2) if aperture_radius > 0 else 1.0
         
-        # Defocus: W = defocus * (2 * (ρ/a)^2 - 1)
-        # где a = aperture_radius
-        W_defocus = defocus * (2.0 * (rho2 / norm_factor) - 1.0) if norm_factor > 0 else 0
+        # Функция апертуры (круглая апертура)
+        # Радиус апертуры в нормированных координатах: NA / λ
+        # Где NA = back_aperture (числовая апертура)
+        if wavelength > 0:
+            aperture_radius_norm = back_aperture / wavelength
+        else:
+            aperture_radius_norm = back_aperture / 0.555  # по умолчанию для зеленого света
         
-        # Astigmatism: W = astigmatism * (ρ/a)^2 * cos(2*φ)
-        W_astigmatism = astigmatism * (rho2 / norm_factor) * np.cos(2.0 * phi) if norm_factor > 0 else 0
+        mask = rho <= aperture_radius_norm
         
-        W = W_defocus + W_astigmatism
+        # Нормированный радиус внутри апертуры (от 0 до 1)
+        rho_norm = np.zeros_like(rho)
+        if aperture_radius_norm > 0:
+            rho_norm[mask] = rho[mask] / aperture_radius_norm
         
-        # Конвертируем в фазу (2π * W)
+        # ВОЛНОВАЯ АБЕРРАЦИЯ (в единицах длин волн)
+        # Это то, что ДОЛЖНО зависеть от длины волны через ρ_norm
+        W = np.zeros_like(rho)
+        
+        # Defocus: W = defocus * (2 * ρ^2 - 1)
+        # Astigmatism: W = astigmatism * ρ^2 * cos(2φ)
+        if np.any(mask):
+            W[mask] = (defocus * (2.0 * rho_norm[mask]**2 - 1.0) + 
+                      astigmatism * rho_norm[mask]**2 * np.cos(2.0 * phi[mask]))
+        
+        # Фазовая задержка (в радианах) = 2π * W
         phase = 2.0 * np.pi * W
-
-        # Функция зрачка: амплитуда * exp(i*фаза)
-        pupil_function = np.zeros_like(rho, dtype=complex)
-        pupil_function[mask] = np.exp(1j * phase[mask])
         
-        # Нормализуем энергию
-        energy = np.sum(np.abs(pupil_function[mask])**2)
-        if energy > 0:
-            pupil_function[mask] /= np.sqrt(energy / np.sum(mask))
+        # Функция зрачка: 1 внутри апертуры, 0 вне, с фазовым множителем
+        pupil = np.zeros((size, size), dtype=complex)
+        pupil[mask] = np.exp(1j * phase[mask])
         
-        return pupil_function
-
+        return pupil
+    
     def _calculate_strehl_ratio(self, psf: np.ndarray, params: ParamPSF) -> float:
-        """Вычисление числа Штреля с учетом параметров системы"""
-        if psf is None or len(psf) == 0:
+        """Вычисление числа Штреля"""
+        if psf is None or psf.size == 0:
             return 0.0
-            
-        # Максимальная интенсивность в центре
-        size = psf.shape[0]
-        center = size // 2
         
-        # Берем небольшую область в центре
-        x_slice = slice(max(0, center-2), min(size, center+3))
-        y_slice = slice(max(0, center-2), min(size, center+3))
-        central_region = psf[x_slice, y_slice]
+        # Центр PSF
+        center_y, center_x = psf.shape[0] // 2, psf.shape[1] // 2
         
-        # Среднее значение в центральной области
-        max_intensity = np.mean(central_region) if central_region.size > 0 else 0
+        # Максимальная интенсивность в центре (область 3x3)
+        y_start = max(0, center_y - 1)
+        y_end = min(psf.shape[0], center_y + 2)
+        x_start = max(0, center_x - 1)
+        x_end = min(psf.shape[1], center_x + 2)
         
-        # Для идеальной системы с круглой апертурой
-        # Интенсивность в центре Airy диска: I0 = (π * NA^2 / λ)^2
-        # Где NA = back_aperture
-        if params.wavelength > 0 and params.back_aperture > 0:
-            ideal_intensity = (np.pi * params.back_aperture**2 / params.wavelength)**2
+        central_region = psf[y_start:y_end, x_start:x_end]
+        if central_region.size == 0:
+            return 0.0
+        
+        max_intensity = np.mean(central_region)
+        
+        # Для идеальной системы (без аберраций) с круглой апертурой
+        # Интенсивность в центре пропорциональна (π * (NA/λ)^2)^2
+        if params.back_aperture > 0 and params.wavelength > 0:
+            # Нормировочный коэффициент
+            norm_factor = (np.pi * (params.back_aperture / params.wavelength)**2)
+            ideal_intensity = norm_factor**2
         else:
             ideal_intensity = 1.0
         
-        # Нормализуем на общую энергию
-        total_energy = np.sum(psf)
-        if total_energy > 0:
-            max_intensity_normalized = max_intensity / total_energy
-            ideal_intensity_normalized = ideal_intensity / (ideal_intensity * np.pi * (params.back_aperture/params.wavelength)**2) if ideal_intensity > 0 else 1.0
-            
-            strehl = max_intensity_normalized / ideal_intensity_normalized if ideal_intensity_normalized > 0 else 0.0
-        else:
-            strehl = 0.0
+        # Число Штреля = отношение реальной интенсивности к идеальной
+        strehl = max_intensity / ideal_intensity if ideal_intensity > 0 else max_intensity
         
-        # Ограничиваем значения [0, 1]
+        # Ограничиваем значение [0, 1]
         return max(0.0, min(strehl, 1.0))
