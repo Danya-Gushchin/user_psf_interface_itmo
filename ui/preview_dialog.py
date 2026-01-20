@@ -142,31 +142,42 @@ class PreviewDialog(QDialog):
             "PDF files (*.pdf);;All files (*.*)"
         )
         
-        if filename:
-            try:
-                self.progress_bar.setVisible(True)
-                self.progress_bar.setRange(0, 0)
-                
-                # Генерируем PDF (без лога)
-                success = self.report_generator.generate_report(
-                    self.params, self.psf_data, self.strehl_ratio,
-                    self.step_microns, filename  # Убрали log_text
-                )
-                
-                if success:
-                    from PyQt6.QtWidgets import QMessageBox
-                    QMessageBox.information(
-                        self, 
-                        "Экспорт завершен", 
-                        f"Отчет успешно экспортирован в файл:\n{filename}"
-                    )
-                else:
-                    QMessageBox.warning(self, "Ошибка", "Не удалось экспортировать отчет")
-                    
-            except Exception as e:
+        if not filename:
+            return
+        
+        try:
+            # Создаем простой диалог прогресса
+            from PyQt6.QtWidgets import QProgressDialog
+            
+            progress = QProgressDialog("Создание PDF отчета...", "Отмена", 0, 0, self)
+            progress.setWindowTitle("Экспорт отчета")
+            progress.setModal(True)
+            progress.setMinimumDuration(0)
+            progress.show()
+            
+            # Даем возможность обработать события
+            from PyQt6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+            
+            # Генерируем PDF
+            success = self.report_generator.generate_report(
+                self.params, self.psf_data, self.strehl_ratio,
+                self.step_microns, filename
+            )
+            
+            progress.close()
+            
+            if success:
                 from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.critical(self, "Ошибка экспорта", f"Ошибка при экспорте отчета: {str(e)}")
-                print(f"Ошибка экспорта: {e}")
+                QMessageBox.information(
+                    self, 
+                    "Экспорт завершен", 
+                    f"Отчет успешно экспортирован в файл:\n{filename}"
+                )
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось экспортировать отчет")
                 
-            finally:
-                self.progress_bar.setVisible(False)
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Ошибка экспорта", f"Ошибка при экспорте отчета: {str(e)}")
+            print(f"Ошибка экспорта: {e}")

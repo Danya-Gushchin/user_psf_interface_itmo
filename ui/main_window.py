@@ -1197,15 +1197,14 @@ class PSFMainWindow(QMainWindow):
             QMessageBox.warning(self, "Предупреждение", "Не выбрана строка с параметрами.")
             return
         
-        # Собираем лог
-        # log_text = self._collect_log_for_report()
-        
         # Вычисляем шаг в микронах
         step_microns = params.calculate_step_microns()
         
         # Создаем диалог выбора файла для PDF
         from PyQt6.QtWidgets import QFileDialog
         from PyQt6.QtCore import QDateTime
+        from PyQt6.QtWidgets import QProgressBar
+
         
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -1214,39 +1213,95 @@ class PSFMainWindow(QMainWindow):
             "PDF files (*.pdf);;All files (*.*)"
         )
         
-        if filename:
-            try:
-                # Показываем прогресс
-                progress_dialog = QMessageBox(self)
-                progress_dialog.setWindowTitle("Генерация отчета")
-                progress_dialog.setText("Идет создание PDF отчета...")
-                progress_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
-                progress_dialog.show()
+        if not filename:
+            return
+        
+        # Создаем диалог прогресса с возможностью отмены
+        progress_dialog = QDialog(self)
+        progress_dialog.setWindowTitle("Генерация отчета")
+        progress_dialog.setModal(True)
+        progress_dialog.setFixedSize(300, 100)
+        
+        progress_layout = QVBoxLayout(progress_dialog)
+        
+        progress_label = QLabel("Идет создание PDF отчета...")
+        progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        progress_layout.addWidget(progress_label)
+        
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 0)  # Неопределенный прогресс
+        progress_layout.addWidget(progress_bar)
+        
+        cancel_button = QPushButton("Отмена")
+        cancel_button.clicked.connect(progress_dialog.reject)
+        progress_layout.addWidget(cancel_button, 0, Qt.AlignmentFlag.AlignCenter)
+        
+        # Запускаем генерацию в отдельном потоке
+        from PyQt6.QtCore import QThread, pyqtSignal
+        import traceback
+        
+        class ReportWorker(QThread):
+            finished = pyqtSignal(bool, str)
+            error = pyqtSignal(str)
+            
+            def __init__(self, generator, params, psf_data, strehl_ratio, step_microns, filename):
+                super().__init__()
+                self.generator = generator
+                self.params = params
+                self.psf_data = psf_data
+                self.strehl_ratio = strehl_ratio
+                self.step_microns = step_microns
+                self.filename = filename
                 
-                # Генерируем отчет
-                success = self.report_generator.generate_report(
-                    params, self.current_psf, self.strehl_ratio,
-                    step_microns, filename
-                )
-                
-                progress_dialog.close()
-                
-                if success:
-                    QMessageBox.information(
-                        self, 
-                        "Отчет создан", 
-                        f"Отчет успешно сохранен в файл:\n{filename}"
+            def run(self):
+                try:
+                    success = self.generator.generate_report(
+                        self.params, self.psf_data, self.strehl_ratio,
+                        self.step_microns, self.filename
                     )
-                    self.log_widget.add_log(f"Отчет сохранен в PDF: {filename}")
-                else:
-                    QMessageBox.warning(self, "Ошибка", "Не удалось создать отчет")
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Ошибка при создании отчета: {str(e)}")
-                self.log_widget.add_log(f"Ошибка создания отчета: {str(e)}")
-                print(f"Ошибка создания отчета: {e}")
-                import traceback
-                traceback.print_exc()
+                    self.finished.emit(success, self.filename)
+                except Exception as e:
+                    self.error.emit(str(e))
+        
+        # Создаем и запускаем worker
+        self.report_worker = ReportWorker(
+            self.report_generator, params, self.current_psf, 
+            self.strehl_ratio, step_microns, filename
+        )
+        
+        # Подключаем сигналы
+        def on_finished(success, filename):
+            progress_dialog.close()
+            if success:
+                QMessageBox.information(
+                    self, 
+                    "Отчет создан", 
+                    f"Отчет успешно сохранен в файл:\n{filename}"
+                )
+                self.log_widget.add_log(f"Отчет сохранен в PDF: {filename}")
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось создать отчет")
+        
+        def on_error(error_msg):
+            progress_dialog.close()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при создании отчета:\n{error_msg}")
+            self.log_widget.add_log(f"Ошибка создания отчета: {error_msg}")
+            print(f"Ошибка создания отчета: {error_msg}")
+            traceback.print_exc()
+        
+        def on_cancel():
+            if self.report_worker.isRunning():
+                self.report_worker.terminate()
+                self.report_worker.wait()
+            progress_dialog.close()
+        
+        self.report_worker.finished.connect(on_finished)
+        self.report_worker.error.connect(on_error)
+        progress_dialog.rejected.connect(on_cancel)
+        
+        # Показываем диалог и запускаем worker
+        progress_dialog.show()
+        self.report_worker.start()
 
     def _export_pdf(self):
         """Алиас для печати отчета"""
