@@ -12,7 +12,7 @@ import os
 class PreviewDialog(QDialog):
     """Диалог предпросмотра отчета"""
     
-    def __init__(self, params, psf_data, strehl_ratio, step_microns, log_text, parent=None):
+    def __init__(self, params, psf_data, strehl_ratio, step_microns, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр отчета")
         self.resize(900, 700)
@@ -21,7 +21,6 @@ class PreviewDialog(QDialog):
         self.psf_data = psf_data
         self.strehl_ratio = strehl_ratio
         self.step_microns = step_microns
-        self.log_text = log_text
         
         self.report_generator = ReportGenerator()
         
@@ -77,10 +76,10 @@ class PreviewDialog(QDialog):
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)  # Индикатор неопределенного прогресса
             
-            # Генерируем HTML предпросмотр
+            # Генерируем HTML предпросмотр (без лога)
             html_content = self.report_generator.generate_preview(
                 self.params, self.psf_data, self.strehl_ratio, 
-                self.step_microns, self.log_text
+                self.step_microns  # Убрали log_text
             )
             
             # Отображаем в браузере
@@ -102,15 +101,13 @@ class PreviewDialog(QDialog):
             temp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
             temp_file.close()
             
-            # Генерируем PDF
+            # Генерируем PDF (без лога)
             success = self.report_generator.generate_report(
                 self.params, self.psf_data, self.strehl_ratio,
-                self.step_microns, self.log_text, temp_file.name
+                self.step_microns, temp_file.name  # Убрали log_text
             )
             
             if success:
-                # В реальном приложении здесь можно использовать QPrinter
-                # Для простоты покажем сообщение
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.information(
                     self, 
@@ -118,14 +115,6 @@ class PreviewDialog(QDialog):
                     f"Отчет сохранен в файл: {temp_file.name}\n\n"
                     "В реальном приложении здесь будет открыт диалог печати."
                 )
-                
-                # В реальном приложении можно использовать:
-                # printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-                # dialog = QPrintDialog(printer, self)
-                # if dialog.exec() == QDialog.DialogCode.Accepted:
-                #     # Печать
-                #     pass
-                
             else:
                 QMessageBox.warning(self, "Ошибка", "Не удалось сгенерировать отчет для печати")
                 
@@ -158,10 +147,10 @@ class PreviewDialog(QDialog):
                 self.progress_bar.setVisible(True)
                 self.progress_bar.setRange(0, 0)
                 
-                # Генерируем PDF
+                # Генерируем PDF (без лога)
                 success = self.report_generator.generate_report(
                     self.params, self.psf_data, self.strehl_ratio,
-                    self.step_microns, self.log_text, filename
+                    self.step_microns, filename  # Убрали log_text
                 )
                 
                 if success:

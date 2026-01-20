@@ -1172,8 +1172,8 @@ class PSFMainWindow(QMainWindow):
             QMessageBox.warning(self, "Предупреждение", "Не выбрана строка с параметрами.")
             return
         
-        # Собираем лог
-        log_text = self._collect_log_for_report()
+        # # Собираем лог
+        # log_text = self._collect_log_for_report()
         
         # Вычисляем шаг в микронах
         step_microns = params.calculate_step_microns()
@@ -1181,7 +1181,7 @@ class PSFMainWindow(QMainWindow):
         # Показываем диалог предпросмотра
         dialog = PreviewDialog(
             params, self.current_psf, self.strehl_ratio, 
-            step_microns, log_text, self
+            step_microns,  self
         )
         dialog.exec()
 
@@ -1198,7 +1198,7 @@ class PSFMainWindow(QMainWindow):
             return
         
         # Собираем лог
-        log_text = self._collect_log_for_report()
+        # log_text = self._collect_log_for_report()
         
         # Вычисляем шаг в микронах
         step_microns = params.calculate_step_microns()
@@ -1226,7 +1226,7 @@ class PSFMainWindow(QMainWindow):
                 # Генерируем отчет
                 success = self.report_generator.generate_report(
                     params, self.current_psf, self.strehl_ratio,
-                    step_microns, log_text, filename
+                    step_microns, filename
                 )
                 
                 progress_dialog.close()
