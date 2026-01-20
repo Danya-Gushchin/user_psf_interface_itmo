@@ -20,6 +20,8 @@ import io
 import traceback
 import pandas as pd
 import csv
+from ui.report_generator import ReportGenerator
+from ui.preview_dialog import PreviewDialog
 
 
 class ParameterTable(QTableWidget):
@@ -595,6 +597,9 @@ class PSFMainWindow(QMainWindow):
         self._init_ui()
         self._init_menu_toolbar()
         self._init_dock_widgets()
+
+        self.report_generator = ReportGenerator()
+        self.print_log_text = ""  # Для хранения лога для печати
         
     def _init_ui(self):
         central = QWidget()
@@ -610,7 +615,7 @@ class PSFMainWindow(QMainWindow):
         self.table_widget.calculation_complete.connect(self._on_calculation_complete)
         self.table_widget.selection_changed.connect(self._on_table_selection_changed)
         
-        # Панель инструментов таблицы
+        # Панель инструментов таблицы (ОБНОВЛЕННАЯ с кнопками печати)
         table_toolbar = QHBoxLayout()
         
         self.btn_add_row = QPushButton("Добавить строку")
@@ -628,6 +633,15 @@ class PSFMainWindow(QMainWindow):
         self.btn_recalc_steps = QPushButton("Пересчет шагов")
         self.btn_recalc_steps.clicked.connect(self._recalculate_steps)
         
+        # НОВЫЕ КНОПКИ ПЕЧАТИ
+        self.btn_preview_report = QPushButton("Предпросмотр отчета")
+        self.btn_preview_report.clicked.connect(self._preview_report)
+        self.btn_preview_report.setEnabled(False)
+        
+        self.btn_print_report = QPushButton("Печать отчета")
+        self.btn_print_report.clicked.connect(self._print_report)
+        self.btn_print_report.setEnabled(False)
+        
         self.btn_calc_selected = QPushButton("Вычислить выбранную")
         self.btn_calc_selected.clicked.connect(self._calculate_selected)
         
@@ -640,6 +654,8 @@ class PSFMainWindow(QMainWindow):
         table_toolbar.addWidget(self.btn_settings)
         table_toolbar.addWidget(self.btn_recalc_steps)
         table_toolbar.addStretch()
+        table_toolbar.addWidget(self.btn_preview_report)  # ДОБАВЛЯЕМ
+        table_toolbar.addWidget(self.btn_print_report)    # ДОБАВЛЯЕМ
         table_toolbar.addWidget(self.btn_calc_selected)
         table_toolbar.addWidget(self.btn_calc_all)
         
@@ -677,13 +693,19 @@ class PSFMainWindow(QMainWindow):
     def _init_menu_toolbar(self):
         menu = self.menuBar()
         
-        # Меню Файл
+        # Меню Файл (ОБНОВЛЕННОЕ)
         file_menu = menu.addMenu("Файл")
         
         act_new_table = QAction("Новая таблица", self)
         act_load_table = QAction("Загрузить таблицу", self)
         act_save_table = QAction("Сохранить таблицу", self)
         act_export_table = QAction("Экспорт таблицы", self)
+        
+        # НОВЫЕ ДЕЙСТВИЯ ДЛЯ ПЕЧАТИ
+        act_preview_report = QAction("Предпросмотр отчета", self)
+        act_print_report = QAction("Печать отчета", self)
+        act_export_pdf = QAction("Экспорт в PDF", self)
+        
         act_export_image = QAction("Экспорт графиков", self)
         act_exit = QAction("Выход", self)
         
@@ -691,6 +713,12 @@ class PSFMainWindow(QMainWindow):
         act_load_table.triggered.connect(self._load_table)
         act_save_table.triggered.connect(self._save_table)
         act_export_table.triggered.connect(self._export_table)
+        
+        # ПОДКЛЮЧАЕМ НОВЫЕ СИГНАЛЫ
+        act_preview_report.triggered.connect(self._preview_report)
+        act_print_report.triggered.connect(self._print_report)
+        act_export_pdf.triggered.connect(self._export_pdf)
+        
         act_export_image.triggered.connect(self._export_all_graphs)
         act_exit.triggered.connect(self.close)
         
@@ -700,6 +728,13 @@ class PSFMainWindow(QMainWindow):
         file_menu.addAction(act_save_table)
         file_menu.addAction(act_export_table)
         file_menu.addSeparator()
+        
+        # ДОБАВЛЯЕМ НОВЫЕ ПУНКТЫ МЕНЮ
+        file_menu.addAction(act_preview_report)
+        file_menu.addAction(act_print_report)
+        file_menu.addAction(act_export_pdf)
+        file_menu.addSeparator()
+        
         file_menu.addAction(act_export_image)
         file_menu.addSeparator()
         file_menu.addAction(act_exit)
@@ -724,7 +759,7 @@ class PSFMainWindow(QMainWindow):
         table_menu.addSeparator()
         table_menu.addAction(act_import_csv)
         
-        # Toolbar
+        # Toolbar (ОБНОВЛЕННЫЙ)
         toolbar = QToolBar("Основные действия")
         self.addToolBar(toolbar)
         
@@ -734,6 +769,11 @@ class PSFMainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(act_settings)
         toolbar.addAction(act_copy_table)
+        toolbar.addSeparator()
+        
+        # ДОБАВЛЯЕМ НА ПАНЕЛЬ ИНСТРУМЕНТОВ
+        toolbar.addAction(act_preview_report)
+        toolbar.addAction(act_print_report)
         toolbar.addAction(act_export_image)
         
     def _add_default_rows(self):
@@ -1096,3 +1136,168 @@ class PSFMainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка экспорта графиков", str(e))
             self.log_widget.add_log(f"Ошибка экспорта графиков: {str(e)}")
             traceback.print_exc()
+    def _collect_log_for_report(self):
+        """Собрать лог для отчета"""
+        try:
+            # Получаем текст из лог-виджета
+            log_text = self.log_widget.text_edit.toPlainText()
+            
+            # Добавляем информацию о текущем выборе
+            selected_rows = self.table_widget.get_selected_rows()
+            if selected_rows:
+                row = selected_rows[0]
+                log_text += f"\n\n--- Информация для отчета ---"
+                log_text += f"\nВыбрана строка: {row + 1}"
+                
+                params = self.table_widget.get_selected_params()
+                if params:
+                    log_text += f"\nРазмер: {params.size}"
+                    log_text += f"\nДлина волны: {params.wavelength:.3f} мкм"
+                    log_text += f"\nЧисло Штреля: {self.strehl_ratio:.6f}"
+            
+            return log_text
+        except Exception as e:
+            print(f"Ошибка сбора лога: {e}")
+            return ""
+
+    def _preview_report(self):
+        """Показать предпросмотр отчета"""
+        if self.current_psf is None:
+            QMessageBox.warning(self, "Предупреждение", "Нет данных для создания отчета. Сначала выполните расчет.")
+            return
+        
+        # Получаем текущие параметры
+        params = self.table_widget.get_selected_params()
+        if params is None:
+            QMessageBox.warning(self, "Предупреждение", "Не выбрана строка с параметрами.")
+            return
+        
+        # Собираем лог
+        log_text = self._collect_log_for_report()
+        
+        # Вычисляем шаг в микронах
+        step_microns = params.calculate_step_microns()
+        
+        # Показываем диалог предпросмотра
+        dialog = PreviewDialog(
+            params, self.current_psf, self.strehl_ratio, 
+            step_microns, log_text, self
+        )
+        dialog.exec()
+
+    def _print_report(self):
+        """Напечатать отчет"""
+        if self.current_psf is None:
+            QMessageBox.warning(self, "Предупреждение", "Нет данных для печати отчета. Сначала выполните расчет.")
+            return
+        
+        # Получаем текущие параметры
+        params = self.table_widget.get_selected_params()
+        if params is None:
+            QMessageBox.warning(self, "Предупреждение", "Не выбрана строка с параметрами.")
+            return
+        
+        # Собираем лог
+        log_text = self._collect_log_for_report()
+        
+        # Вычисляем шаг в микронах
+        step_microns = params.calculate_step_microns()
+        
+        # Создаем диалог выбора файла для PDF
+        from PyQt6.QtWidgets import QFileDialog
+        from PyQt6.QtCore import QDateTime
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить отчет в PDF",
+            f"psf_report_{QDateTime.currentDateTime().toString('yyyyMMdd_hhmmss')}.pdf",
+            "PDF files (*.pdf);;All files (*.*)"
+        )
+        
+        if filename:
+            try:
+                # Показываем прогресс
+                progress_dialog = QMessageBox(self)
+                progress_dialog.setWindowTitle("Генерация отчета")
+                progress_dialog.setText("Идет создание PDF отчета...")
+                progress_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+                progress_dialog.show()
+                
+                # Генерируем отчет
+                success = self.report_generator.generate_report(
+                    params, self.current_psf, self.strehl_ratio,
+                    step_microns, log_text, filename
+                )
+                
+                progress_dialog.close()
+                
+                if success:
+                    QMessageBox.information(
+                        self, 
+                        "Отчет создан", 
+                        f"Отчет успешно сохранен в файл:\n{filename}"
+                    )
+                    self.log_widget.add_log(f"Отчет сохранен в PDF: {filename}")
+                else:
+                    QMessageBox.warning(self, "Ошибка", "Не удалось создать отчет")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Ошибка при создании отчета: {str(e)}")
+                self.log_widget.add_log(f"Ошибка создания отчета: {str(e)}")
+                print(f"Ошибка создания отчета: {e}")
+                import traceback
+                traceback.print_exc()
+
+    def _export_pdf(self):
+        """Алиас для печати отчета"""
+        self._print_report()
+
+    def _on_calculation_complete(self, row: int, strehl_ratio: float):
+        """Обработчик завершения расчета строки (ОБНОВЛЕННЫЙ)"""
+        self.log_widget.add_log(f"Строка {row+1}: расчет завершен, Штрель = {strehl_ratio:.6f}")
+        
+        # Включаем кнопки печати после расчета
+        self.btn_preview_report.setEnabled(True)
+        self.btn_print_report.setEnabled(True)
+
+    def _on_table_selection_changed(self, row: int):
+        """Обработчик изменения выбранной строки в таблице (ОБНОВЛЕННЫЙ)"""
+        params = self.table_widget.get_selected_params()
+        strehl = self.table_widget.get_selected_strehl()
+        
+        if params:
+            # Обновляем информацию
+            step_microns = params.calculate_step_microns()
+            info_text = f"""
+            <b>Строка {row+1}:</b><br><br>
+            <b>Основные параметры:</b><br>
+            • Размер: {params.size}<br>
+            • λ: {params.wavelength:.3f} мкм<br>
+            • Апертура: {params.back_aperture:.3f}<br>
+            • Увеличение: {params.magnification:.1f}<br>
+            • Расфокусировка: {params.defocus:.3f}<br>
+            • Астигматизм: {params.astigmatism:.3f}<br><br>
+            <b>Параметры дискретизации:</b><br>
+            • Охват зрачка: {params.pupil_diameter:.3f} к.ед.<br>
+            • Шаг по зрачку: {params.step_pupil:.6f} к.ед.<br>
+            • Шаг по предмету: {params.step_object:.6f} к.ед.<br>
+            • Шаг по изображению: {params.step_image:.6f} к.ед.<br>
+            • Шаг в изображении: {step_microns:.6f} мкм<br><br>
+            <b>Число Штреля:</b> {strehl:.6f}
+            """
+            self.selected_info_label.setText(info_text)
+            
+            # Вычисляем и отображаем PSF
+            try:
+                self.current_psf, self.strehl_ratio = self.calculator.compute(params)
+                step_microns = self.calculator._step_im_microns
+                self.psf_view.show_psf(self.current_psf, step_microns)
+                self.log_widget.add_log(f"Отображена ФРТ для строки {row+1}")
+                
+                # Включаем кнопки печати
+                self.btn_preview_report.setEnabled(True)
+                self.btn_print_report.setEnabled(True)
+                
+            except Exception as e:
+                self.log_widget.add_log(f"Ошибка отображения ФРТ: {str(e)}")
+                traceback.print_exc()
