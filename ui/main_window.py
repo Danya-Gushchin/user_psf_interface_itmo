@@ -23,6 +23,7 @@ import csv
 from ui.report_generator import ReportGenerator
 from ui.preview_dialog import PreviewDialog
 from PyQt6.QtCore import QTimer
+from ui.progress_dialog import ProgressDialog, CalculationWorker
 
 
 class ParameterTable(QTableWidget):
@@ -1046,21 +1047,104 @@ class PSFMainWindow(QMainWindow):
                 self.table_widget.current_params_list.append(params)
             
     def _calculate_selected(self):
-        """Вычислить выбранную строку"""
-        self.table_widget.calculate_selected()
+        """Вычислить выбранную строку с прогресс-баром"""
+        selected_rows = self.table_widget.get_selected_rows()
         
+        if not selected_rows:
+            QMessageBox.warning(self, "Предупреждение", "Выберите строку для вычисления")
+            return
+        
+        row = selected_rows[0]
+        
+        # Создаем диалог прогресса
+        progress_dialog = ProgressDialog(
+            self, 
+            "Вычисление выбранной строки", 
+            1
+        )
+        
+        # Создаем worker для вычислений
+        worker = CalculationWorker(self.table_widget, [row])
+        progress_dialog.set_worker(worker)
+        
+        # Подключаем сигналы
+        worker.progress_updated.connect(progress_dialog.set_progress)
+        worker.status_updated.connect(progress_dialog.set_status)
+        worker.time_updated.connect(progress_dialog.set_time_info)
+        worker.calculation_finished.connect(
+            lambda success: self._on_calculation_worker_finished(progress_dialog, success)
+        )
+        
+        # Запускаем вычисления
+        worker.start()
+        progress_dialog.exec()
+        
+    def _on_calculation_worker_finished(self, dialog, success):
+        """Обработчик завершения работы worker'а"""
+        if success:
+            dialog.set_status("Расчеты завершены успешно!")
+            dialog.set_progress(dialog.progress_bar.maximum())
+            self.log_widget.add_log("Все расчеты завершены успешно")
+            
+            # Закрываем диалог через 500ms
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(500, dialog.accept)
+        else:
+            if dialog.is_canceled:
+                dialog.set_status("Расчеты отменены пользователем")
+                self.log_widget.add_log("Расчеты отменены пользователем")
+            else:
+                dialog.set_status("Ошибка при выполнении расчетов")
+                self.log_widget.add_log("Ошибка при выполнении расчетов")
+            
+            # Закрываем диалог через 1000ms
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1000, dialog.reject)
+
     def _calculate_all(self):
-        """Вычислить все строки"""
+        """Вычислить все строки с прогресс-баром"""
+        row_count = self.table_widget.rowCount()
+        
+        if row_count == 0:
+            QMessageBox.warning(self, "Предупреждение", "Таблица пуста")
+            return
+        
         reply = QMessageBox.question(
             self,
             "Вычисление всей таблицы",
-            "Выполнить расчет ФРТ для всех строк таблицы?\nЭто может занять некоторое время.",
+            f"Выполнить расчет ФРТ для всех {row_count} строк таблицы?\n"
+            "Это может занять некоторое время.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
-        if reply == QMessageBox.StandardButton.Yes:
-            self.table_widget.calculate_all()
-            self.log_widget.add_log("Выполнен расчет всей таблицы")
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Создаем список всех строк
+        rows_to_calculate = list(range(row_count))
+        
+        # Создаем диалог прогресса
+        progress_dialog = ProgressDialog(
+            self, 
+            "Вычисление всех строк", 
+            row_count
+        )
+        
+        # Создаем worker для вычислений
+        worker = CalculationWorker(self.table_widget, rows_to_calculate)
+        progress_dialog.set_worker(worker)
+        
+        # Подключаем сигналы
+        worker.progress_updated.connect(progress_dialog.set_progress)
+        worker.status_updated.connect(progress_dialog.set_status)
+        worker.time_updated.connect(progress_dialog.set_time_info)
+        worker.calculation_finished.connect(
+            lambda success: self._on_calculation_worker_finished(progress_dialog, success)
+        )
+        
+        # Запускаем вычисления
+        worker.start()
+        progress_dialog.exec()
             
     def _on_calculation_complete(self, row: int, strehl_ratio: float):
         """Обработчик завершения расчета строки"""

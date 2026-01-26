@@ -8,7 +8,7 @@ from .log_widget import LogWidget
 from .settings_dialog import SettingsDialog
 from .preview_dialog import PreviewDialog
 from .report_generator import ReportGenerator
-
+from .progress_dialog import ProgressDialog
 __all__ = [
     'PSFMainWindow',
     'PSFView', 
@@ -16,5 +16,6 @@ __all__ = [
     'SettingsDialog',
     'PreviewDialog',
     'ProgressDialog',
-    'ReportGenerator'
+    'ReportGenerator',
+    'ProgressDialog'
 ]
